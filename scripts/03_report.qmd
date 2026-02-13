@@ -1,0 +1,724 @@
+---
+title: "UGANDA'S DIGITAL MENTAL HEALTH LEAP. \n Harnessing DHIS2 for Data Driven Insights"
+subtitle: "Data Analysis Report"
+author: "Project team"
+#date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    lot: true
+    lof: true
+    number_sections: true
+    number-depth: 2
+    code_folding: hide
+    theme: cosmo
+    highlight: tango
+    df_print: paged
+  docx:
+    toc: true
+    number_sections: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+#| echo: false
+#| warning: false
+#| message: false
+source(here::here("scripts","00_setup.R"))
+
+library(gemini.R)
+base::readRenviron("~/.Renviron")
+api_key = Sys.getenv("GEMINI_API_KEY")
+setAPI(api_key)
+```
+
+# EXPLORATION OF THE EVENTS DATA
+
+
+```{r data_import}
+#| label: import_data
+#| include: false
+#| echo: false
+#| warning: false
+
+full_data <- read_csv(here::here("data", "data_clean.csv"), col_names = T)
+target_data <- full_data %>%
+  filter(!is.na(mh_diagnosis_cleaned)) %>% 
+  filter(mh_year>=2022 & mh_year<=2024) %>%
+  mutate(
+    mh_age_group = cut(mh_age_in_years, 
+                             breaks = c(0, 4, 9, 14, 19, 35, 45, 55, Inf), 
+                             labels = c("< 5yrs", "5-9", "10-14", "15-19",
+                                        "20-35", "36-45", "46-55",  " > 55"),)
+  ) %>% 
+  group_by(patient_id) %>% 
+  mutate(mh_visit_log = n()) %>% 
+  ungroup() %>%
+  select(patient_id, mh_organisation_unit_name, mh_date_of_visit, mh_visit_log, mh_month,
+         mh_year, mh_sex, mh_age_group, mh_classification, mh_diagnosis_cleaned, everything()
+         )
+```
+
+
+## Data Sources and Coverage
+Data used in this analysis was extracted from out-patient register records from 18 hospitals across Uganda - comprising of 17 regional referral hospitals and one national referral hospital. The data covers the period from 2022 to 2024 and includes individuals diagnosed with a range of mental health conditions.
+@tbl-data-source presents the distribution of patient records across the participating hospitals highlighting the relative contribution of each facility to the overall dataset, while @fig-total-patients illustrates the geographical distribution of the participating health facilities across the country.
+```{r}
+#| label: tbl-data-source
+#| tbl-cap: "Distribution of patient records across participating hospitals"
+#| echo: false
+#| include: true
+#| warning: false
+#| caption: "Data Source"
+
+
+# Data sources
+target_data %>% 
+  select(mh_organisation_unit_name) %>% 
+  gtsummary::tbl_summary(
+                         label = list( mh_organisation_unit_name = ""),
+                         sort = list(mh_organisation_unit_name ~ "frequency"),
+                          missing_text = "(Missing)") %>% 
+modify_header(label ~ "**Hospital**") %>% 
+modify_table_body(~ .x %>% slice(-1))
+
+```
+
+```{r}
+#| label: fig-total-patients
+#| echo: false
+#| include: true
+#| warning: false
+#| fig-cap: "Hospital location and number of patient records from each hospital"
+
+#Insert the map from plots folder
+
+knitr::include_graphics(here("outputs", "uganda_mh_map.png"))
+```
+
+
+
+## Demographics
+@tbl-table1-demo summarizes the patient demographic and clinical characteristics. A total of 142,716 unique patients were included in the analysis with an equal distribution of sex (50% female and 50% male).
+The age distribution revealed that the majority of patients (44%) were young adults, particularly within the 20–35 year age group, followed by those aged 36–45 years (18%). Additionally, a significant proportion of patients (87%) were classified as "Re-attendance", indicating that many patients returned for follow-up visits during the study period. This pattern highlights the high burden of mental health conditions in young adults  and the recurrent nature of care-seeking behavior by the mental health patients.
+
+
+```{r}
+#| label: tbl-table1-demo
+#| tbl-cap: "Socio-demographic characteristics of patients"
+#| echo: false
+#| include: true
+#| warning: false
+
+
+
+# Summary statistics for socio-demographics
+tb1 <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>% 
+  select(mh_age_group, mh_sex, mh_year, mh_classification,
+         mh_patient_category, mh_depression, mh_anxiety) %>%
+   mutate(
+    mh_year = as.factor(mh_year),
+    mh_depression = as.factor(mh_depression),
+    mh_anxiety = as.factor(mh_anxiety)
+   ) %>% 
+tbl_summary(
+                         label = list(mh_sex = "Sex",
+                                      mh_depression = "Depression",
+                                      mh_anxiety = "Anxiety",
+                                      mh_year  = "Year of visit",  
+                                      mh_classification = "Classification",
+                                      mh_patient_category = "Nationality",
+                                      mh_age_group = "Age group"),
+                         type = all_dichotomous() ~ "categorical",
+                          missing_text = "(Missing)",
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  #add_n() %>%
+  #add_overall(last = T) %>% 
+  bold_labels() 
+
+
+table1 <- as_gt(tb1) %>%
+  tab_style(
+    style = cell_borders(
+      sides = c("left", "right"),
+      color = "black",
+      weight = px(1.5)
+    ),
+    locations = list(cells_body(), cells_column_labels()) 
+  ) %>% 
+  
+  tab_style(
+  style = cell_fill(color = "navyblue"),
+  locations = cells_column_labels()
+  ) %>%
+  
+  tab_style(
+    style = cell_text(color = "white"),
+    locations = cells_column_labels()
+  ) %>%
+  
+  tab_options(
+    table.font.names = "Arial",
+    table.font.size = px(14),
+    data_row.padding = px(5),
+    table.background.color = "white",
+    #column_labels.background.color = "lightgray"
+    )
+ 
+table1
+
+t1 <- gtsave(table1, filename = here::here("outputs", "table1.png"))
+
+#request_text = "Use the image t1 from gtsummary package above to provide a 3-sentence insight about the socio-demographic characteristics of patients diagnosed with depression and anxiety in Uganda. Focus on key patterns and trends that can be observed from the table, such as age distribution"
+
+#table1_log = gemini_image(image = t1, prompt = request_text,  maxOutputTokens = 5000)
+
+#narrative <- gemini_chat(paste0( "Provide a 3-sentence insight about this table:", table1_log))
+#print(narrative)
+
+```
+
+
+
+# DEPRESSION AND ANXIETY 
+For the rest of the analysis, we focus on the two target diagnoses of depression and anxiety, the most prevalent mental health conditions and focus of the research. 
+
+## Exploratory analysis 
+@tbl-demo-table2 presents the distribution of patient demographic characteristics with respect to diagnosis. A higher proportion of the patients diagnosed with depression were females (55%) compared to males (45%). Similarly, the proportion of patients diagnosed with anxiety was also higher among females (60%) compared to males (40%) indicating a higher burden which is consistent with global trends in mental health epidemiology. Majority of patients diagnosed with depression and anxiety fall within the 20-35 years age group indicating a higher burden among young adults. 
+ 
+```{r}
+#| label: tbl-demo-table1
+#| tbl-cap: "Demographic characteristics of patients"
+#| echo: false
+#| include: false
+#| warning: false
+
+target_data <- read_csv(here("data", "data_dep_anx.csv")) %>% 
+    mutate(visits_cat = case_when(
+    mh_visits_total == 1 ~ "1 visit",
+    mh_visits_total == 2  ~ "2 visits",
+    mh_visits_total == 3 ~ "3 visits",
+    mh_visits_total == 4 ~ "4 visits",
+    mh_visits_total >= 5 ~ "5+ visits"),
+    mh_age_group = fct_relevel(mh_age_group, c("< 5yrs", "5-9", "10-14", "15-19",
+                                        "20-35", "36-45", "46-55",  " > 55") 
+  ))
+tbx <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>% 
+  filter(mh_depression == "Yes"|mh_anxiety == "Yes") %>% 
+  select(mh_age_group, mh_sex, mh_year, mh_classification,
+         mh_patient_category) %>%
+   mutate(
+    mh_year = as.factor(mh_year)
+   ) %>% 
+tbl_summary(
+                         label = list(mh_sex = "Sex",
+                                      mh_year  = "Year of visit",  
+                                      mh_classification = "Classification",
+                                      mh_patient_category = "Nationality",
+                                      mh_age_group = "Age group"),
+                         type = all_dichotomous() ~ "categorical",
+                          missing_text = "(Missing)",
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  #add_n() %>%
+  #add_overall(last = T) %>% 
+  bold_labels() 
+
+
+table1_f <- as_gt(tbx) %>%
+  tab_style(
+    style = cell_borders(
+      sides = c("left", "right"),
+      color = "black",
+      weight = px(1.5)
+    ),
+    locations = list(cells_body(), cells_column_labels()) 
+  ) %>% 
+  
+  tab_style(
+  style = cell_fill(color = "navyblue"),
+  locations = cells_column_labels()
+  ) %>%
+  
+  tab_style(
+    style = cell_text(color = "white"),
+    locations = cells_column_labels()
+  ) %>%
+  
+  tab_options(
+    table.font.names = "Arial",
+    table.font.size = px(14),
+    data_row.padding = px(5),
+    table.background.color = "white",
+    #column_labels.background.color = "lightgray"
+    )
+ 
+table1_f
+```
+
+
+
+## Association with diagnosis
+```{r}
+#| label: tbl-demo-table2
+#| tbl-cap: "Associations between socio-demographic characteristics and mental health diagnosis"
+#| echo: false
+#| include: true
+#| warning: false
+
+
+# bi-variate associations with diagnosis
+tb2 <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_depression == "Yes") %>%
+  mutate(mh_depression= if_else(mh_depression == "Yes", "Depression", mh_depression)) %>%
+   select(mh_sex, mh_age_group, mh_classification, mh_depression) %>% 
+  gtsummary::tbl_summary(by = mh_depression, 
+                         label = list( mh_sex = "Sex",
+                                      mh_depression = "Depression",
+                                      mh_classification = "Classification",
+                                      mh_age_group = "Age group"),
+                          missing_text = "(Missing)",
+                          #digits = all_categorical() ~ 2,
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  #add_n() %>%
+  #add_overall(last = T) %>% 
+  bold_labels() 
+
+#Table for Anxiety
+tb2_b <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_anxiety == "Yes") %>%
+  mutate(mh_anxiety= if_else(mh_anxiety == "Yes", "Anxiety", mh_anxiety)) %>%
+  select(mh_sex, mh_age_group, mh_classification, mh_anxiety) %>% 
+  gtsummary::tbl_summary(by = mh_anxiety, 
+                         label = list( mh_sex = "Sex",
+                                       mh_classification = "Classification",
+                                       mh_age_group = "Age group"),
+                         missing_text = "(Missing)",
+                         #digits = all_categorical() ~ 2,
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  bold_labels() 
+
+#merge the two tables
+table2 <- tbl_merge(
+  tbls = list(tb2, tb2_b),
+  tab_spanner = FALSE
+)
+
+
+
+table2 <- as_gt(table2) %>%
+  tab_style(
+    style = cell_borders(
+      sides = c("left", "right"),
+      color = "black",
+      weight = px(1.5)
+    ),
+    locations = list(cells_body(), cells_column_labels()) 
+  ) %>% 
+  
+  tab_style(
+  style = cell_fill(color = "navyblue"),
+  locations = cells_column_labels()
+  ) %>%
+  
+  tab_style(
+    style = cell_text(color = "white"),
+    locations = cells_column_labels()
+  ) %>%
+  
+  tab_options(
+    table.font.names = "Arial",
+    table.font.size = px(14),
+    data_row.padding = px(5),
+    table.background.color = "white",
+    #column_labels.background.color = "lightgray"
+    )
+ 
+table2
+
+
+```
+
+
+```{r}
+#| label: age-group-plot
+#| fig-cap: "Depression by patient age group and sex"
+#| echo: false
+#| include: true
+#| warning: false
+#| fig.width: 12
+#| out-width: "100%"
+
+ # We will use the fresh theme from ggthemr to plot the age distribution graph
+ggthemr('fresh')
+
+age_depression <- target_data %>%
+   distinct(patient_id, .keep_all = T) %>%
+  filter(mh_depression == "Yes") %>%
+  filter(!is.na(mh_age_group)) %>%
+  ggplot(aes(mh_age_group)) +
+  geom_bar(na.rm = T, fill = "steelblue") +
+  geom_text(
+    aes(label = after_stat(count)),
+    stat = "count",
+    vjust = -0.05,
+    size = 3.5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  labs(x = "Age group", y = "No. of patients", title = "Depression by patient age group") +
+  #scale_y_continuous(breaks = seq(0, 35000, by = 5000)) +
+  coord_cartesian(ylim = c(0, 40000)) +
+  #coord_flip() +
+  theme(
+    axis.text = element_text(size = 11, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+  )
+
+
+sex_depression <- target_data %>%
+   distinct(patient_id, .keep_all = T) %>%
+  filter(mh_depression == "Yes") %>%
+  filter(!is.na(mh_sex)) %>%
+  ggplot(aes(mh_sex)) +
+  geom_bar(na.rm = T, fill = "#FF1493") +
+  #scale_fill_manual(values = c("seagreen4", "lightblue3")) +
+  geom_text(
+    aes(label = after_stat(count)),
+    stat = "count",
+    vjust = -0.05,
+    size = 3.5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  labs(x = "Sex", y = "", title = "Depression by pateint sex") +
+  #scale_y_continuous(limits = c(0, 40000)) +
+  coord_cartesian(ylim = c(0, 40000)) +
+  #coord_flip() +
+  theme(
+    axis.text = element_text(size = 11, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+  )
+
+age_depression + sex_depression + plot_layout(ncol = 2)
+
+```
+
+
+```{r}
+#| label: age_group_sex_plot
+#| echo: false
+#| include: true
+#| warning: false
+#| fig.width: 12
+target_data %>%
+   distinct(patient_id, .keep_all = T) %>%
+  filter(!is.na(mh_age_group)) %>%
+  filter(!is.na(mh_sex)) %>%
+  filter(mh_depression == "Yes") %>%
+ggplot(
+       aes(mh_age_group, fill = mh_sex)
+)+
+  geom_bar(na.rm = T, 
+           position = "dodge") +
+  scale_fill_manual(values = c("#FF1493", "#4682B4")) +
+  #scale_fill_viridis_d(option = "cividis") + 
+  geom_text(
+    aes(label = after_stat(count)), 
+    stat = "count",
+    position = position_dodge(width = 0.9),
+    vjust = -0.05, 
+    size = 3.5,
+    fontface = "bold",  
+    color = "black")+
+  labs( x= "Age group",
+        y = "No. of patients",
+        fill = "Sex") +
+  scale_y_continuous(breaks = seq(0, 20000, by = 5000))+
+  scale_x_discrete(expand = c(0,0))+
+  #coord_flip()+
+  theme(
+    axis.text = element_text(size = 11, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    legend.title = element_blank(),
+    #legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.position = "top"
+  )
+
+```
+ 
+ 
+```{r}
+#| label: tbl-demo-table3
+#| tbl-cap: "Depression patients across facilities"
+#| echo: false
+#| include: true
+#| warning: false
+
+
+# bi-variate associations with diagnosis
+tb3 <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_depression == "Yes") %>%
+  mutate(mh_depression= if_else(mh_depression == "Yes", "Depression", mh_depression)) %>%
+   select(mh_organisation_unit_name, mh_depression) %>% 
+  gtsummary::tbl_summary(by = mh_depression, 
+                         label = list( mh_organisation_unit_name = "Hospital",
+                                      mh_depression = "Depression"),
+                         sort = list(mh_organisation_unit_name ~ "frequency"),
+                          missing_text = "(Missing)",
+                          #digits = all_categorical() ~ 2,
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  #add_n() %>%
+  #add_overall(last = T) %>% 
+  bold_labels() 
+
+#Table for Anxiety
+tb3_b <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_anxiety == "Yes") %>%
+  mutate(mh_anxiety= if_else(mh_anxiety == "Yes", "Anxiety", mh_anxiety)) %>%
+  select(mh_organisation_unit_name, mh_anxiety) %>% 
+  gtsummary::tbl_summary(by = mh_anxiety, 
+                         label = list( mh_organisation_unit_name = "Hospital"),
+                         missing_text = "(Missing)",
+                         sort = list(mh_organisation_unit_name ~ "frequency"),
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  bold_labels() 
+
+
+
+table3 <- as_gt(tb3) %>%
+  tab_style(
+    style = cell_borders(
+      sides = c("left", "right"),
+      color = "black",
+      weight = px(1.5)
+    ),
+    locations = list(cells_body(), cells_column_labels()) 
+  ) %>% 
+  
+  tab_style(
+  style = cell_fill(color = "navyblue"),
+  locations = cells_column_labels()
+  ) %>%
+  
+  tab_style(
+    style = cell_text(color = "white"),
+    locations = cells_column_labels()
+  ) %>%
+  
+  tab_options(
+    table.font.names = "Arial",
+    table.font.size = px(14),
+    data_row.padding = px(5),
+    table.background.color = "white",
+    #column_labels.background.color = "lightgray"
+    )
+ 
+table3
+
+low = (min(target_data$mh_visits_total) +1)
+up = max(target_data$mh_visits_total) 
+```
+
+# LONGITUDINAL DATA ANALYSIS OF ANXIETY AND DEPRESSION PATIENT OUTCOMES
+
+Over the three-year study period, some patients made repeated hospital visits ranging from **`r low` ** to **`r up` ** visits as presented in @tbl-visits-distribution. However a higher percentage of patients (83%) had only one visit during the study period. This pattern of visit frequency suggests that while a significant proportion of patients may have sought care for their mental health conditions, many did not return for follow-up visits, which could indicate challenges in continuity of care or barriers to accessing ongoing treatment.
+
+
+## Visit frequency
+
+::: {.columns}
+
+::: {.column width="30%"}
+
+```{r}
+#| label: tbl-visits-distribution
+#| tbl-cap: "Hospital visits frequency"
+#| echo: false
+#| include: true
+#| warning: false
+
+tb5<- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  #filter(mh_depression == "Yes") %>%
+  mutate(mh_visits_total = as.factor(mh_visits_total)) %>%
+  select(mh_visits_total) %>% 
+  gtsummary::tbl_summary( 
+                         label = list( mh_visits_total = "Hospital visits"
+                                    ),
+                          missing_text = "(Missing)",
+                          #digits = all_categorical() ~ 2,
+                         statistic = list(all_continuous() ~ "{mean} ({sd})",
+                                          all_categorical() ~ "{n} ({p}%)")) %>% 
+  bold_labels() 
+
+table5 <- as_gt(tb5) %>%
+  tab_style(
+    style = cell_borders(
+      sides = c("left", "right"),
+      color = "black",
+      weight = px(1.5)
+    ),
+    locations = list(cells_body(), cells_column_labels()) 
+  ) %>% 
+  
+  tab_style(
+  style = cell_fill(color = "navyblue"),
+  locations = cells_column_labels()
+  ) %>%
+  
+  tab_style(
+    style = cell_text(color = "white"),
+    locations = cells_column_labels()
+  ) %>%
+  tab_options(
+    table.font.names = "Arial",
+    table.font.size = px(11),
+    data_row.padding = px(2.5)
+    )
+
+table5 
+
+```
+
+:::
+
+::: {.column width="5%"}
+
+:::
+
+::: {.column width="65%"}
+
+```{r}
+#| label: fig-visits__diagnosis
+#| fig-cap: "Visit frequency for depression and anxiety patients"
+#| echo: false
+#| include: true
+#| warning: false
+#| fig.width: 8
+#| fig.height: 10
+
+
+visits_dep <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_depression == "Yes") %>%
+  ggplot(aes(x=visits_cat)) +
+  geom_bar(na.rm = T, fill = "#459395") +
+  geom_text(
+    aes(label = after_stat(count)),
+    stat = "count",
+     hjust = -0.05,
+    size = 3.5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  labs(x = "Total hospital visits", y = "", 
+       title = "Visit frequency for depression patients") +
+  coord_cartesian(ylim = c(0, 60000)) +
+  coord_flip() +
+  theme(
+    axis.text = element_text(size = 11, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5)
+  )
+
+visits_anx <- target_data %>% 
+  distinct(patient_id, .keep_all = T) %>%
+  filter(mh_anxiety == "Yes") %>%
+  ggplot(aes(x=visits_cat)) +
+  geom_bar(na.rm = T, fill = "#d35400") +
+  geom_text(
+    aes(label = after_stat(count)),
+    stat = "count",
+    hjust = -0.05,
+    size = 3.5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  labs(x = "Total hospital visits", y = "No. of patients", 
+       title = "Visit frequency for anxiety patients") +
+  #coord_cartesian(ylim = c(0, 50000)) +
+  coord_flip() +
+  theme(
+    axis.text = element_text(size = 11, face = "bold"),
+    axis.title = element_text(size = 11, face = "bold"),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5)
+  )
+
+visits_dep + visits_anx + plot_layout(nrow = 2)
+```
+
+:::
+
+:::
+
+```{r}
+#| label: visit-frequency-plot
+#| fig-cap: "Visit frequency for depression patients"
+#| echo: false
+#| include: true
+#| warning: false
+#| fig.width: 8
+
+
+target_data <- target_data %>% 
+  filter(mh_depression == "Yes"| mh_anxiety == "Yes") %>% 
+  filter(mh_year >=2022 & mh_year <=2024) %>% 
+  mutate(
+  facility = gsub(
+    pattern = "Regional Referral Hospital",
+    replacement = "RRH",
+    x = mh_organisation_unit_name )
+  ) 
+
+  
+target_data %>% 
+  group_by(mh_year, mh_month) %>% 
+  mutate(mh_year = as.factor(mh_year)) %>%
+  summarise(load= n()) %>% 
+  ggplot(aes(x=mh_month, y=load, group = mh_year, colour = mh_year)) +
+  geom_line( size=1) +
+  geom_point( size=2) +
+  scale_x_continuous(
+    breaks = 1:12, 
+    labels = month.abb)+
+  scale_y_continuous(limits = c(0,3500), 
+                     breaks = seq(0,3500, by=500)) +
+  labs(title="Monthly patient visit patterns by year",
+       x="",
+       y="Number of Visits") +
+  theme_minimal()
+
+
+```
+
+# Visit history
+```{r}
+#| label: visit-history
+#| include: true
+#| echo: false
+#| warning: false
+
+# How many of the depression patients had their 1st visit in the study period
+# For those with visits> 1, how many have visit 1 as a new-attendance?
+
+
+```
+
