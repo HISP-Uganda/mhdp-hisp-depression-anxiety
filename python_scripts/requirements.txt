@@ -1,0 +1,11 @@
+pandas
+numpy
+scikit-learn
+streamlit
+matplotlib
+seaborn
+plotly
+geopandas # Keep if you need map features
+fiona       # geopandas dependency
+pyproj      # geopandas dependency
+shapely     # geopandas dependency
