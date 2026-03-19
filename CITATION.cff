@@ -4,6 +4,6 @@ authors:
 - family-names: "HISP Uganda"
   given-names: "The MHDP Team
 title: "Harnessing DHIS2 for Data Driven Insights"
-version: 2.0
+version: 2.0.4
 date-released: 2026-03-10
 url: "https://github.com/HISP-Uganda/mhdp-hisp-depression-anxiety"
